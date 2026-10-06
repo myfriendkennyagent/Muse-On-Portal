@@ -24,3 +24,7 @@ secrets/
 sdk_token
 pairing.json
 identity.json
+
+# Python
+__pycache__/
+*.pyc

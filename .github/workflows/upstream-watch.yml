@@ -1,0 +1,42 @@
+name: Watch Muse Gadget SDK
+
+# The app re-implements Meta's Muse Gadget protocol. When upstream changes the
+# files it was ported from, open an issue so the port can follow before the
+# server stops accepting the old behaviour.
+on:
+  schedule:
+    - cron: "17 15 * * 1" # Mondays, 08:17 Pacific
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compare with tools/upstream.lock
+        id: check
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set +e
+          python3 tools/check_upstream.py > report.md
+          echo "changed=$([ $? -ne 0 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          cat report.md
+
+      - name: Open or update an issue
+        if: steps.check.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          title="Upstream Muse Gadget SDK protocol changed"
+          existing=$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body-file report.md
+          else
+            gh issue create --title "$title" --body-file report.md
+          fi

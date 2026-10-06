@@ -24,6 +24,8 @@ data class ChatEvent(
   val displayTextReady: Boolean,
   val activityCode: String?,
   val status: String?,
+  /** The chat session the event belongs to, when the server says. */
+  val sessionId: String = "",
 ) {
   val isEvent: Boolean
     get() = type == "event"
@@ -52,6 +54,7 @@ data class ChatEvent(
         displayTextReady = payload.optBoolean("display_text_ready", true),
         activityCode = payload.opt("activity_code") as? String,
         status = payload.opt("status") as? String,
+        sessionId = payload.optString("session_id").ifEmpty { root.optString("session_id") },
       )
     }
   }

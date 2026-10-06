@@ -36,11 +36,7 @@ class DeviceDescription(
   val displayName: String,
   val version: String,
   val commands: JSONObject,
-  // The Linux SDK's known-good values. Never family "link" or a `device.ota`
-  // command: the server pushes ESP32 firmware to every "link" device.
-  val platform: String = "linux",
-  val deviceFamily: String = "homehub",
-  val modelId: String = "linux",
+  val profile: RegistrationProfile = RegistrationProfile.DEFAULT,
   val metadata: Map<String, String> = emptyMap(),
 ) {
   fun registerParams(): JSONObject {
@@ -48,10 +44,10 @@ class DeviceDescription(
       JSONObject()
         .put("node_id", nodeId)
         .put("display_name", displayName)
-        .put("platform", platform)
+        .put("platform", profile.platform)
         .put("version", version)
-        .put("device_family", deviceFamily)
-        .put("model_id", modelId)
+        .put("device_family", profile.deviceFamily)
+        .put("model_id", profile.modelId)
         .put("is_wakeup_supported", false)
         .put("commands_v2", commands)
     if (metadata.isNotEmpty()) params.put("metadata", JSONObject(metadata))

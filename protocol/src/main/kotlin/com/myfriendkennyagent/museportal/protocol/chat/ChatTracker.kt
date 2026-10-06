@@ -19,7 +19,8 @@ sealed class ChatUpdate {
   /**
    * An assistant message outside a turn that belongs to this device: a late
    * reply to an earlier turn (an agentic task finishing), or a message with
-   * no parent, such as a scheduled check-in.
+   * no parent, such as a scheduled check-in. Never a reply in a conversation
+   * that started elsewhere, such as the phone app.
    */
   data class Announcement(val messageId: String, val text: String) : ChatUpdate()
 }
@@ -34,6 +35,10 @@ enum class EndReason { SETTLED, NO_REPLY, TOO_LONG, CANCELLED }
  * agent keeps it open. Not thread-safe: call from one thread or under a lock.
  */
 class ChatTracker(
+  /** This device's side chat, if it posts to one: events from other sessions are ignored. */
+  private val ownSessionId: () -> String? = { null },
+  /** After a message from another client, parentless replies are assumed to answer it for this long. */
+  private val foreignQuietMs: Long = 120_000,
   private val clock: () -> Long = { System.nanoTime() / 1_000_000 },
   private val settleMs: Long = 3_000,
   private val replyTimeoutMs: Long = 60_000,
@@ -57,6 +62,7 @@ class ChatTracker(
   private val early = ArrayList<ChatEvent>()
 
   private var lastSeq = 0L
+  private var lastForeignUserAt = Long.MIN_VALUE / 2
   private val rejected = Bounded(64)
   private val foreignUserIds = Bounded(64)
   private val ownIds = Bounded(64)
@@ -98,6 +104,8 @@ class ChatTracker(
 
   fun onEvent(e: ChatEvent) {
     if (!e.isEvent) return
+    val own = ownSessionId()
+    if (own != null && e.sessionId.isNotEmpty() && e.sessionId != own) return
     if (e.seq > 0) {
       if (e.seq <= lastSeq) return
       lastSeq = e.seq
@@ -158,6 +166,7 @@ class ChatTracker(
       lastEventAt = clock()
     } else if (!ownIds.contains(e.messageId)) {
       foreignUserIds.add(e.messageId)
+      lastForeignUserAt = clock()
     }
   }
 
@@ -184,7 +193,10 @@ class ChatTracker(
     val id = e.messageId.ifEmpty { return }
     if (rejected.contains(id)) return
     val parent = e.replyTo
-    val ours = parent.isEmpty() || ownIds.contains(parent)
+    // A parentless message right after someone used Muse elsewhere is most
+    // likely that conversation's reply: stay quiet rather than narrate it.
+    val parentlessButBusyElsewhere = parent.isEmpty() && clock() - lastForeignUserAt < foreignQuietMs
+    val ours = (parent.isEmpty() && !parentlessButBusyElsewhere) || ownIds.contains(parent)
     if (!ours || foreignUserIds.contains(parent)) {
       rejected.add(id)
       return

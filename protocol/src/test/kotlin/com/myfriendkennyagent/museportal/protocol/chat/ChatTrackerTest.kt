@@ -9,7 +9,8 @@ import org.junit.Test
 class ChatTrackerTest {
   private var now = 0L
   private val updates = ArrayList<ChatUpdate>()
-  private val tracker = ChatTracker(clock = { now }, emit = { updates += it })
+  private var sideChat: String? = null
+  private val tracker = ChatTracker(ownSessionId = { sideChat }, clock = { now }, emit = { updates += it })
   private var seq = 0L
 
   private fun event(name: String, payload: JSONObject) {
@@ -89,11 +90,40 @@ class ChatTrackerTest {
     event("message.user", JSONObject().put("message_id", "phone-1").put("content", "hi from phone"))
     delta("delta.message_start", "r1", parent = "phone-1")
     delta("delta.message_done", "r1", parent = "phone-1", text = "hello phone")
-    // A scheduled check-in with no parent.
+    // A scheduled check-in with no parent, once the phone conversation is quiet.
+    now += 121_000
     delta("delta.message_start", "c1")
     delta("delta.text_append", "c1", text = "Good morning! ")
     delta("delta.message_done", "c1")
     assertEquals(listOf(ChatUpdate.Announcement("c1", "Good morning!")), updates)
+  }
+
+  @Test
+  fun `a parentless reply right after a phone message is not narrated`() {
+    now = 1_000_000
+    event("message.user", JSONObject().put("message_id", "phone-2").put("content", "what's on today?"))
+    delta("delta.message_start", "r2")
+    delta("delta.message_done", "r2", text = "Three meetings.")
+    assertEquals(emptyList<ChatUpdate>(), updates)
+    // Long after, a parentless message is a check-in again.
+    now += 121_000
+    delta("delta.message_start", "c2")
+    delta("delta.message_done", "c2", text = "Your build finished.")
+    assertEquals(listOf(ChatUpdate.Announcement("c2", "Your build finished.")), updates)
+  }
+
+  @Test
+  fun `events from other sessions are ignored when using a side chat`() {
+    sideChat = "portal-chat"
+    tracker.beginTurn()
+    tracker.onAck("u1", null)
+    val other =
+      """{"type":"event","seq":1,"event":"delta.message_done","session_id":"main","payload":{"message_id":"x","display_text":"phone stuff"}}"""
+    val mine =
+      """{"type":"event","seq":2,"event":"delta.message_done","payload":{"message_id":"a1","reply_to_message_id":"u1","display_text":"portal stuff","session_id":"portal-chat"}}"""
+    tracker.onEvent(ChatEvent.parse(other)!!)
+    tracker.onEvent(ChatEvent.parse(mine)!!)
+    assertEquals(listOf(ChatUpdate.Reply("a1", "portal stuff")), updates)
   }
 
   @Test

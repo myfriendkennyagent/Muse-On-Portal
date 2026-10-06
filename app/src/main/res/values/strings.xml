@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Muse on Portal</string>
+    <string name="notification_channel">Muse connection</string>
+    <string name="notification_text">Connected to your Muse</string>
+</resources>
