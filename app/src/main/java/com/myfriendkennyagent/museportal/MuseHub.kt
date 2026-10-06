@@ -67,6 +67,9 @@ object MuseHub {
   val display = MutableStateFlow<DisplayContent?>(null)
   val pairing = MutableStateFlow<PairingStatus>(PairingStatus.Idle)
 
+  /** Why replies can't reach this Portal, or null while the chat subscription is healthy. */
+  val subscriptionError = MutableStateFlow<String?>(null)
+
   /** Set while the service runs. */
   @Volatile var actions: MuseActions? = null
 

@@ -36,6 +36,13 @@ interface ConnectionListener {
 
   /** A line from the chat subscription. Called on the session's read loop: keep it quick. */
   fun onChatEvent(event: ChatEvent) {}
+
+  /**
+   * The chat subscription opened ([error] null) or failed. Replies to this
+   * device's messages only arrive through it, so a refusal (say, if the
+   * server stops offering it to Linux-profile devices) must be visible.
+   */
+  fun onSubscription(error: String?) {}
 }
 
 /** Exponential backoff as upstream: 2 s doubling to 60 s, with an optional floor. */
@@ -180,7 +187,12 @@ class MuseConnection(
       val streamListener =
         object : StreamListener {
           override fun onResponse(status: Int, headers: List<Header>) {
-            if (status >= 400) ended.complete("HTTP $status")
+            if (status >= 400) {
+              ended.complete("HTTP $status")
+              listener.onSubscription("Muse refused the reply stream (HTTP $status)")
+            } else {
+              listener.onSubscription(null)
+            }
           }
 
           override fun onData(data: ByteArray) {
@@ -210,6 +222,7 @@ class MuseConnection(
         log.info("chat subscription closed: ${ended.await()}")
       } catch (e: IOException) {
         log.warning("chat subscription failed: $e")
+        if (!session.closed) listener.onSubscription("couldn't open the reply stream: ${e.message}")
       }
       delay(SUBSCRIBE_RETRY_MS)
     }

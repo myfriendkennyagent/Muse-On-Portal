@@ -48,6 +48,9 @@ a long-running task finishes.
 
 ## Get it running
 
+Laptop setup (adb, JDK, Android SDK, Claude Code) is in
+[docs/LAPTOP.md](docs/LAPTOP.md).
+
 You need: a Portal with **Settings > Debug > ADB Enabled**, a data USB-C
 cable, `adb`, an SDK token from
 [gadgets.muse.ai](https://gadgets.muse.ai/settings/sdk-tokens), and the Muse

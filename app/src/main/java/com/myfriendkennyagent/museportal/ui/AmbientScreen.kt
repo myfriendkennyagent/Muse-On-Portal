@@ -66,6 +66,7 @@ fun AmbientScreen(onOpenSettings: () -> Unit) {
   val ui by MuseHub.ui.collectAsState()
   val connection by MuseHub.connection.collectAsState()
   val display by MuseHub.display.collectAsState()
+  val replyStreamError by MuseHub.subscriptionError.collectAsState()
   var typing by remember { mutableStateOf(false) }
 
   Box(Modifier.fillMaxSize().background(PortalColors.Background)) {
@@ -73,7 +74,12 @@ fun AmbientScreen(onOpenSettings: () -> Unit) {
       Modifier.fillMaxSize().padding(top = TOP_OVERLAY, start = 24.dp, end = 24.dp, bottom = 24.dp),
       horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-      Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { StatusChip(connection) }
+      Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+        replyStreamError?.takeIf { connection == ConnectionState.Connected }?.let {
+          Text(it, style = MaterialTheme.typography.bodyMedium, color = PortalColors.Amber, modifier = Modifier.padding(end = 16.dp))
+        }
+        StatusChip(connection)
+      }
       Row(Modifier.weight(1f).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.weight(0.42f), contentAlignment = Alignment.Center) {
           Orb(

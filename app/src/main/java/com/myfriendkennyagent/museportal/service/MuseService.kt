@@ -88,6 +88,11 @@ class MuseService : LifecycleService() {
             override fun onChatEvent(event: ChatEvent) {
               turns.offer(event)
             }
+
+            override fun onSubscription(error: String?) {
+              MuseHub.subscriptionError.value = error
+              if (error != null) Log.w(TAG, "reply stream: $error")
+            }
           },
       )
     turns = TurnController(this, scope, connection, speaker, settings)
