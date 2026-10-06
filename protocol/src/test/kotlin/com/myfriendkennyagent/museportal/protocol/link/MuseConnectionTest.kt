@@ -133,6 +133,46 @@ class MuseConnectionTest {
   }
 
   @Test
+  fun `a refused reply stream is reported, not silent`(): Unit = runBlocking {
+    val server = MockWebServer()
+    server.dispatcher =
+      object : Dispatcher() {
+        override fun dispatch(request: RecordedRequest): MockResponse =
+          MockResponse().setBody("""{"vm_list":[{"vm_ws_url":"wss://x","vm_auth_token":"t","vm_name":"k","vm_id":"v","default":true}]}""")
+      }
+    server.start()
+    try {
+      val store =
+        MemoryStore(PairingRecord("a", "r", apiUrlV2 = "https://unused", noiseHost = "n", accessTokenSavedAt = 1_000_000))
+      val vm = FakeVm(this).apply { subscribeStatus = 403 }
+      val reports = Channel<String?>(Channel.UNLIMITED)
+      val connection =
+        MuseConnection(
+          store = store,
+          api = HttpsToHttpApi(server),
+          connector = vm.connector,
+          device = { DeviceDescription("homelink-123456", "Portal", "0.1.0", JSONObject()) },
+          runner = { _, _, _ -> CommandResult.ok() },
+          listener =
+            object : ConnectionListener {
+              override fun onSubscription(error: String?) {
+                reports.trySend(error)
+              }
+            },
+          wallClock = { 1_000_000 },
+        )
+      withTimeout(15_000) {
+        val job = launch { connection.run() }
+        val report = reports.receive()
+        assertEquals(true, report?.contains("HTTP 403"))
+        job.cancel()
+      }
+    } finally {
+      server.shutdown()
+    }
+  }
+
+  @Test
   fun `backoff doubles to a ceiling and honours its floor`() {
     val b = Backoff()
     assertEquals(listOf(2_000L, 4_000L, 8_000L, 16_000L, 32_000L, 60_000L, 60_000L), List(7) { b.nextDelayMs() })

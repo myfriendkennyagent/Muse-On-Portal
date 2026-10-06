@@ -30,7 +30,7 @@ act on the Portal through commands it registers:
 
 A Kotlin port of the Muse Gadget SDK's Linux client (Meta, Apache-2.0),
 checked byte-for-byte against the SDK's own Python code and published test
-vectors (51 tests, CI green):
+vectors (56 tests, CI green):
 
 1. `GET api.muse.ai/fetch_vms` with the device token → your VM and its bearer.
 2. `wss://hatch.metaaivm.com/v1/noise` → Noise XX handshake.
@@ -86,3 +86,16 @@ vectors (51 tests, CI green):
   speak proactively.
 - `app/src/main/java/.../commands/PortalCommands.kt`: the commands you can call.
 - `docs/ARCHITECTURE.md`: protocol notes and known fragility.
+
+## Round 2: what changed after your code review
+
+| Your note | Done |
+|---|---|
+| Whole `message.assistant` proactive messages were dropped | Fixed. They're announced whether streamed or whole, except in the first 5 s after the subscription (re)opens, when they may be replayed history. Each message id is spoken at most once: the streamed copy, the persisted copy and an in-turn reply never double up. Four new tests. |
+| Make `/chat/subscribe` failures loud and specific | Logs now say `REPLY STREAM REFUSED (HTTP 4xx)`, pointing at the registration profile and retrying every 60 s, or `REPLY STREAM DROPPED (network or VM)`, reopening in 3 s. The screen says which one. Tested against a fake VM that refuses. |
+| `voice.say` queue vs barge-in | Default queues behind current speech; `media.play_url` audio ducks to 20% underneath. `urgent=true` interrupts speech and stops media. Quiet hours skip non-urgent speech and show it on screen instead; the result says `spoken: false`. All in the command description. |
+| 15-second clip hint | If the recorder hits 15 s while you're still talking, the screen says "clipped at 15 seconds: try something shorter" (the note is still sent). |
+| Side chat default | On by default, with a stable per-install `session_id`. Safety net: if a side-chat turn gets no reply and not even its own message back, the Portal switches to the main chat and says so. |
+| Your Q1 (scheduled tasks and gadget commands) | Noted: the gig alert will be set up as a scheduled task in the Muse app and tested once paired. |
+| Tiger MP4s | Yes please, after the first hardware run. A custom face animation (or a `display.play_video` command) is on the list. |
+

@@ -34,7 +34,11 @@ import org.json.JSONObject
  * device is and what each command does, so it can pick them on its own
  * ("show me a picture of a heron on the Portal").
  */
-class PortalCommands(private val context: Context, private val speaker: Speaker) : CommandRunner {
+class PortalCommands(
+  private val context: Context,
+  private val speaker: Speaker,
+  private val quietHours: () -> Boolean = { false },
+) : CommandRunner {
   private val http =
     OkHttpClient.Builder().connectTimeout(15, TimeUnit.SECONDS).readTimeout(30, TimeUnit.SECONDS).build()
   private val audio = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -74,8 +78,12 @@ class PortalCommands(private val context: Context, private val speaker: Speaker)
           "Speak text aloud on the Portal's speaker, as an announcement to whoever is in the room. Use it " +
             "to tell the user something proactively on this Portal: when a scheduled or background task " +
             "finds what they asked to hear about, a reminder comes due, or a long task finishes. " +
-            "Keep it to a sentence or two. Replies when it has been queued.",
+            "Keep it to a sentence or two. By default it queues behind anything already being said, and " +
+            "audio from media.play_url plays on, quieter, underneath it. With urgent=true (alarms, timers, " +
+            "anything time-critical) it interrupts current speech and stops media.play_url audio. " +
+            "Speech is skipped during the user's quiet hours unless urgent. Replies once queued.",
           required = listOf(Param("text", "string", "What to say.")),
+          optional = listOf(Param("urgent", "boolean", "Interrupt speech and media instead of queueing. Default false.")),
         ),
         CommandSpec(
           "voice.configure",
@@ -148,8 +156,18 @@ class PortalCommands(private val context: Context, private val speaker: Speaker)
     val text = params.optString("text")
     if (text.isBlank()) return CommandResult.error("text is required")
     if (!speaker.available.value) return CommandResult.error("no text-to-speech engine is installed on this Portal")
+    val urgent = params.optBoolean("urgent", false)
+    if (!urgent && quietHours()) {
+      MuseHub.ui.value = MuseHub.ui.value.copy(caption = text)
+      return CommandResult.ok(JSONObject().put("spoken", false).put("reason", "quiet hours; shown on screen instead"))
+    }
+    if (urgent) {
+      stopMedia()
+      speaker.stop()
+    }
+    MuseHub.ui.value = MuseHub.ui.value.copy(caption = text)
     speaker.speak(text)
-    return CommandResult.ok()
+    return CommandResult.ok(JSONObject().put("spoken", true).put("queued", !urgent))
   }
 
   private fun configureVolume(params: JSONObject): JSONObject {
@@ -192,6 +210,13 @@ class PortalCommands(private val context: Context, private val speaker: Speaker)
         CommandResult.error("couldn't play that: ${e.message}")
       }
     }
+  }
+
+  /** Lowers media.play_url audio while Muse speaks over it. */
+  fun duck(on: Boolean) {
+    try {
+      player?.setVolume(if (on) DUCKED_VOLUME else 1f, if (on) DUCKED_VOLUME else 1f)
+    } catch (e: IllegalStateException) {}
   }
 
   fun stopMedia() {
@@ -249,5 +274,6 @@ class PortalCommands(private val context: Context, private val speaker: Speaker)
 
   companion object {
     const val MAX_IMAGE_BYTES = 20 * 1024 * 1024
+    const val DUCKED_VOLUME = 0.2f
   }
 }

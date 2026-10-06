@@ -69,6 +69,11 @@ class TurnController(
     events.trySend(event)
   }
 
+  /** The reply stream (re)opened: messages in the next few seconds may be replayed history. */
+  fun onSubscribed() {
+    scope.launch { tracker.onSubscribed() }
+  }
+
   /** The talk button: start listening, or finish the current recording. */
   fun talk() {
     if (listening) {
@@ -91,7 +96,11 @@ class TurnController(
         when {
           rec.reason == StopReason.MIC_ERROR -> MuseHub.setFace(Face.ERROR, "The microphone isn't available.")
           !rec.heardSpeech -> MuseHub.setFace(Face.IDLE, "I didn't catch that.")
-          else -> send(rec.pcm)
+          else -> {
+            send(rec.pcm)
+            // Muse stops listening at 15 s: say so rather than cut off silently.
+            if (rec.clipped) MuseHub.ui.update { it.copy(heard = "(clipped at 15 seconds: try something shorter)") }
+          }
         }
       }
   }
@@ -157,7 +166,16 @@ class TurnController(
         if (!speaker.speaking.value) MuseHub.setFace(if (update.busy) Face.WORKING else Face.THINKING)
       is ChatUpdate.TurnEnded ->
         when (update.reason) {
-          EndReason.NO_REPLY -> MuseHub.setFace(Face.IDLE, "Muse is still working on it. I'll tell you when it's done.")
+          EndReason.NO_REPLY ->
+            if (!update.sawOwnMessage && settings.sideChatId != null) {
+              // Not even our own message came back: side-chat events may not reach
+              // this subscription. Fall back to the main chat, where they do.
+              Log.w(TAG, "no events for a side-chat turn; switching to the main chat")
+              settings.sideChatId = null
+              MuseHub.setFace(Face.IDLE, "Replies didn't come back from the Portal's own chat, so I switched to your main chat. Please ask again.")
+            } else {
+              MuseHub.setFace(Face.IDLE, "Muse is still working on it. I'll tell you when it's done.")
+            }
           EndReason.TOO_LONG -> MuseHub.setFace(Face.IDLE)
           EndReason.SETTLED,
           EndReason.CANCELLED -> if (!speaker.speaking.value && !listening) MuseHub.setFace(Face.IDLE)

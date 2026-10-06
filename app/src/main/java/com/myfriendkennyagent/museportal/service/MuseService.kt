@@ -63,7 +63,7 @@ class MuseService : LifecycleService() {
     val userAgent = "MuseOnPortal/${BuildConfig.VERSION_NAME} (${Build.MODEL}; Android ${Build.VERSION.RELEASE})"
     val api = MuseApi(userAgent = userAgent)
     speaker = Speaker(this).also { it.setRate(settings.speechRate) }
-    commands = PortalCommands(this, speaker)
+    commands = PortalCommands(this, speaker, quietHours = settings::inQuietHours)
     connection =
       MuseConnection(
         store = store,
@@ -91,7 +91,7 @@ class MuseService : LifecycleService() {
 
             override fun onSubscription(error: String?) {
               MuseHub.subscriptionError.value = error
-              if (error != null) Log.w(TAG, "reply stream: $error")
+              if (error == null) turns.onSubscribed() else Log.w(TAG, "reply stream: $error")
             }
           },
       )
@@ -128,6 +128,9 @@ class MuseService : LifecycleService() {
 
         override fun importFromAdb(): List<String> = store.importPending().also { if (it.isNotEmpty()) restartConnection() }
       }
+
+    // Music from media.play_url plays on, quieter, while Muse talks over it.
+    scope.launch { speaker.speaking.collect { commands.duck(it) } }
 
     acquireLocks()
     startConnection()

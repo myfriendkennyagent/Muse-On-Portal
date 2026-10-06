@@ -14,7 +14,12 @@ sealed class ChatUpdate {
   /** Muse started or stopped working on something (tools, tasks). */
   data class Busy(val busy: Boolean) : ChatUpdate()
 
-  data class TurnEnded(val reason: EndReason) : ChatUpdate()
+  /**
+   * The turn is over. [sawOwnMessage] says whether Muse acknowledged the
+   * message at all (its transcript or any reply arrived): a turn that ends
+   * without it suggests replies aren't reaching this device.
+   */
+  data class TurnEnded(val reason: EndReason, val sawOwnMessage: Boolean = false) : ChatUpdate()
 
   /**
    * An assistant message outside a turn that belongs to this device: a late
@@ -44,6 +49,8 @@ class ChatTracker(
   private val replyTimeoutMs: Long = 60_000,
   private val busyHoldMs: Long = 60_000,
   private val turnCapMs: Long = 180_000,
+  /** After the subscription (re)opens, whole messages without live deltas may be history being replayed. */
+  private val replayGuardMs: Long = 5_000,
   private val emit: (ChatUpdate) -> Unit,
 ) {
   private class Msg(val id: String) {
@@ -57,6 +64,7 @@ class ChatTracker(
   private var lastEventAt = 0L
   private var agentBusy = false
   private var heard = false
+  private var sawOwn = false
   private val userIds = LinkedHashSet<String>()
   private val msgs = LinkedHashMap<String, Msg>()
   private val early = ArrayList<ChatEvent>()
@@ -67,6 +75,9 @@ class ChatTracker(
   private val foreignUserIds = Bounded(64)
   private val ownIds = Bounded(64)
   private val live = LinkedHashMap<String, Msg>()
+  /** Messages already spoken (as a reply or an announcement), so a later copy is never spoken twice. */
+  private val spoken = Bounded(128)
+  private var subscribedAt = Long.MIN_VALUE / 2
 
   val turnActive: Boolean
     get() = active
@@ -77,6 +88,7 @@ class ChatTracker(
     active = true
     acked = false
     heard = false
+    sawOwn = false
     startedAt = clock()
     lastEventAt = startedAt
     agentBusy = false
@@ -100,6 +112,11 @@ class ChatTracker(
 
   fun cancelTurn() {
     if (active) end(EndReason.CANCELLED)
+  }
+
+  /** Call when the subscription stream (re)opens. */
+  fun onSubscribed() {
+    subscribedAt = clock()
   }
 
   fun onEvent(e: ChatEvent) {
@@ -157,6 +174,7 @@ class ChatTracker(
   private fun onUserMessage(e: ChatEvent) {
     if (e.messageId.isEmpty()) return
     if (active && e.messageId in userIds) {
+      sawOwn = true
       // The row reads "<transcript>\n[file:audio/wav ...]", or "[Voice note]" before transcription.
       val heardText = e.fullText.substringBefore("\n[file:").trim()
       if (heardText.isNotEmpty() && heardText != "[Voice note]" && !heard) {
@@ -185,13 +203,18 @@ class ChatTracker(
       m = Msg(id).also { msgs[id] = it }
       ownIds.add(id)
     }
+    sawOwn = true
     lastEventAt = clock()
-    applyDelta(m, e)?.let { emit(ChatUpdate.Reply(id, it)) }
+    applyDelta(m, e)?.let {
+      spoken.add(id)
+      emit(ChatUpdate.Reply(id, it))
+    }
   }
 
   private fun onOutsideMessage(e: ChatEvent) {
     val id = e.messageId.ifEmpty { return }
-    if (rejected.contains(id)) return
+    // The streamed message and its persisted copy share an id: speak it once.
+    if (rejected.contains(id) || spoken.contains(id)) return
     val parent = e.replyTo
     // A parentless message right after someone used Muse elsewhere is most
     // likely that conversation's reply: stay quiet rather than narrate it.
@@ -204,16 +227,22 @@ class ChatTracker(
     val m =
       live[id]
         ?: run {
-          // Only messages seen starting live: a reconnect must not replay old history aloud.
-          if (e.event != "delta.message_start" && e.event != "delta.text_append") return
+          val streaming = e.event == "delta.message_start" || e.event == "delta.text_append"
+          // A whole message with no live deltas is fine too (proactive messages may
+          // arrive that way), except just after the subscription opened, when it
+          // may be history being replayed: a reconnect must not read old news aloud.
+          if (!streaming && clock() - subscribedAt < replayGuardMs) return
           Msg(id).also {
-            live[id] = it
             ownIds.add(id)
-            while (live.size > MAX_MSGS) live.remove(live.keys.first())
+            if (streaming) {
+              live[id] = it
+              while (live.size > MAX_MSGS) live.remove(live.keys.first())
+            }
           }
         }
     applyDelta(m, e)?.let {
       live.remove(id)
+      spoken.add(id)
       emit(ChatUpdate.Announcement(id, it))
     }
   }
@@ -243,7 +272,7 @@ class ChatTracker(
   private fun end(reason: EndReason) {
     active = false
     early.clear()
-    emit(ChatUpdate.TurnEnded(reason))
+    emit(ChatUpdate.TurnEnded(reason, sawOwn))
   }
 
   private class Bounded(private val cap: Int) {

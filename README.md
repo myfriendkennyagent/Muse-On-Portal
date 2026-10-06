@@ -38,7 +38,7 @@ a long-running task finishes.
 
 | Piece | State |
 |---|---|
-| Protocol: pairing v5, Noise XX, link session, chat streaming, token refresh | Done, 51 tests |
+| Protocol: pairing v5, Noise XX, link session, chat streaming, token refresh | Done, 56 tests |
 | App: face, tap-to-talk, captions, spoken replies, typed messages | Done, needs a run on hardware |
 | Commands: `display.draw_url`, `display.show_text`, `voice.say`, `voice.configure`, `media.play_url`, `device.health` | Done |
 | Pairing over the Portal's Bluetooth | Built; Portal BLE advertising not yet verified |
@@ -71,9 +71,11 @@ Done looks like:
 1. The Portal shows **Connected**, and Muse lists it under Devices.
 2. Tap the orb: "What's on my calendar today?". You hear the answer.
 3. From your phone: "Show a picture of a heron on my Portal". It appears.
-4. The proactive moment: from the Portal, "Every weekday at 9, check for new
-   paid gigs and tell me on the Portal when one lands". Muse announces it
-   aloud on the Portal (it calls `voice.say` on this device).
+4. The proactive moment: create a scheduled task **in the Muse app**:
+   "Every weekday at 9, check for new paid gigs and tell me on the Portal when
+   one lands". Muse announces it aloud on the Portal by calling `voice.say` on
+   this device. Whether scheduled runs can call gadget commands is the open
+   experiment. If they can't, a parentless check-in message is spoken too.
 
 ## Develop
 

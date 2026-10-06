@@ -54,6 +54,8 @@ class FakeVm(private val scope: CoroutineScope) {
   val chatBodies = Channel<JSONObject>(Channel.UNLIMITED)
   val subscribed = CompletableDeferred<Long>()
   var rejectUpgradeWith: Int? = null
+  /** Answer `/chat/subscribe` with this status; anything but 200 refuses it. */
+  var subscribeStatus = 200
   var chatAck: JSONObject = JSONObject().put("message_id", "user-1").put("reply_to_message_id", "parent-0")
 
   private lateinit var socket: MemorySocket
@@ -96,10 +98,13 @@ class FakeVm(private val scope: CoroutineScope) {
           paths[frame.streamId] = v.path
           when (v.path) {
             LinkSession.CONTROL_PATH -> controlStream = frame.streamId
-            LinkSession.SUBSCRIBE_PATH -> {
-              reply(frame.streamId, ApplicationResponse(200, body = "{\"type\":\"subscribed\"}\n".toByteArray()))
-              subscribed.complete(frame.streamId)
-            }
+            LinkSession.SUBSCRIBE_PATH ->
+              if (subscribeStatus != 200) {
+                reply(frame.streamId, ApplicationResponse(subscribeStatus, endBody = true))
+              } else {
+                reply(frame.streamId, ApplicationResponse(200, body = "{\"type\":\"subscribed\"}\n".toByteArray()))
+                subscribed.complete(frame.streamId)
+              }
             else -> {
               bodies[frame.streamId] = ByteArrayOutputStream().apply { write(v.body) }
               if (v.endBody) finishRequest(frame.streamId)

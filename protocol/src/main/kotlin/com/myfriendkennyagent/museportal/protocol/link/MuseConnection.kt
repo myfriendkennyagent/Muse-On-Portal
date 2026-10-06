@@ -179,18 +179,23 @@ class MuseConnection(
     outcome to lasted
   }
 
-  /** Holds `/chat/subscribe` open while [session] lives, reopening it if it ends. */
+  /**
+   * Holds `/chat/subscribe` open while [session] lives, reopening it if it
+   * ends. Failures are told apart, because the fixes differ: the server
+   * refusing the stream (a 4xx: likely not offered to this registration
+   * profile) versus the network or the VM hiccuping (reconnect and carry on).
+   */
   private suspend fun subscribeLoop(session: LinkSession) {
     while (!session.closed) {
-      val ended = CompletableDeferred<String>()
+      val ended = CompletableDeferred<SubscriptionEnd>()
       val splitter = NdjsonSplitter()
       val streamListener =
         object : StreamListener {
           override fun onResponse(status: Int, headers: List<Header>) {
             if (status >= 400) {
-              ended.complete("HTTP $status")
-              listener.onSubscription("Muse refused the reply stream (HTTP $status)")
+              ended.complete(SubscriptionEnd.Http(status))
             } else {
+              log.info("chat subscription open (HTTP $status)")
               listener.onSubscription(null)
             }
           }
@@ -202,30 +207,60 @@ class MuseConnection(
           }
 
           override fun onEnd() {
-            ended.complete("ended")
+            ended.complete(SubscriptionEnd.Closed)
           }
 
           override fun onError(reason: String) {
-            ended.complete(reason)
+            ended.complete(SubscriptionEnd.Transport(reason))
           }
         }
-      try {
-        session.openStream(
-          "POST",
-          LinkSession.SUBSCRIBE_PATH,
-          LinkSession.jsonHeaders(accept = "application/x-ndjson"),
-          streamListener,
-          body = "{}".toByteArray(),
-          endBody = true,
-        )
-        log.info("chat subscription open")
-        log.info("chat subscription closed: ${ended.await()}")
-      } catch (e: IOException) {
-        log.warning("chat subscription failed: $e")
-        if (!session.closed) listener.onSubscription("couldn't open the reply stream: ${e.message}")
+      val end =
+        try {
+          session.openStream(
+            "POST",
+            LinkSession.SUBSCRIBE_PATH,
+            LinkSession.jsonHeaders(accept = "application/x-ndjson"),
+            streamListener,
+            body = "{}".toByteArray(),
+            endBody = true,
+          )
+          ended.await()
+        } catch (e: IOException) {
+          SubscriptionEnd.Transport(e.message ?: e.javaClass.simpleName)
+        }
+      if (session.closed) return
+      when (end) {
+        is SubscriptionEnd.Http ->
+          if (end.status in 400..499) {
+            val why = "Muse refused the reply stream (HTTP ${end.status}). Replies won't reach this Portal."
+            log.severe(
+              "REPLY STREAM REFUSED: /chat/subscribe answered HTTP ${end.status}. The server is likely not " +
+                "offering it to this registration profile (${device().profile}); see RegistrationProfile.kt " +
+                "and the upstream SDK for changes. Retrying every ${SUBSCRIBE_REFUSED_RETRY_MS / 1000}s."
+            )
+            listener.onSubscription(why)
+            delay(SUBSCRIBE_REFUSED_RETRY_MS)
+            continue
+          } else {
+            log.warning("REPLY STREAM SERVER ERROR: /chat/subscribe answered HTTP ${end.status}; retrying")
+            listener.onSubscription("Muse's reply stream had a server error (HTTP ${end.status}); retrying.")
+          }
+        is SubscriptionEnd.Transport -> {
+          log.warning("REPLY STREAM DROPPED (network or VM): ${end.reason}; reopening")
+          listener.onSubscription("Reconnecting the reply stream…")
+        }
+        SubscriptionEnd.Closed -> log.info("chat subscription ended by the VM; reopening")
       }
       delay(SUBSCRIBE_RETRY_MS)
     }
+  }
+
+  private sealed class SubscriptionEnd {
+    data class Http(val status: Int) : SubscriptionEnd()
+
+    data class Transport(val reason: String) : SubscriptionEnd()
+
+    data object Closed : SubscriptionEnd()
   }
 
   /** Posts a chat message on the live session. Throws IOException when not connected. */
@@ -285,6 +320,7 @@ class MuseConnection(
     const val HEALTHY_SESSION_MS = 30_000L
     const val UNPAIRED_POLL_MS = 5_000L
     const val SUBSCRIBE_RETRY_MS = 3_000L
+    const val SUBSCRIBE_REFUSED_RETRY_MS = 60_000L
     /** Device access tokens live about 4 hours; rotate at 3. */
     const val TOKEN_REFRESH_AGE_S = 3 * 3600L
     const val TOKEN_RETRY_MS = 300_000L

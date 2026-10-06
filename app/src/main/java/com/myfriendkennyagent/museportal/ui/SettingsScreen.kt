@@ -170,9 +170,9 @@ fun SettingsScreen(store: FileDeviceStore, settings: Settings, onClose: () -> Un
           else "No voice engine yet. Run tools/deploy.sh --tts (see docs/TTS.md)."
       }
       if (voiceNote.isNotEmpty()) Text(voiceNote, style = MaterialTheme.typography.bodyMedium)
-      Toggle("Keep Portal conversations in their own chat (experimental)", sideChat) {
+      Toggle("Keep Portal conversations in their own chat", sideChat) {
         sideChat = it
-        settings.sideChatId = if (it) settings.sideChatId ?: "portal-" + UUID.randomUUID().toString().take(8) else null
+        settings.sideChatId = if (it) UUID.randomUUID().toString() else null
       }
     }
   }

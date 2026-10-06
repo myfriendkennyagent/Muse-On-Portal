@@ -63,10 +63,22 @@ whole session against an in-process fake VM.
 - **Proactive speech.** The subscription carries every chat event, including
   conversations you have in the phone app. The Portal only speaks a message
   outside a turn if it is a late reply to one of its own turns, or has no
-  parent and nobody used Muse elsewhere in the last two minutes. The robust
-  path for announcements is Muse calling `voice.say` on the device, which
-  only happens when Muse means the Portal. With the experimental side chat on,
-  events tagged with another session are ignored entirely.
+  parent and nobody used Muse elsewhere in the last two minutes. A message
+  counts whether it streams in as deltas or arrives whole as
+  `message.assistant`, except in the first 5 s after the subscription
+  (re)opens, when whole messages may be replayed history. Every message id is
+  spoken at most once (the streamed message and its persisted copy share an
+  id). The robust path for announcements is Muse calling `voice.say` on the
+  device, which only happens when Muse means the Portal.
+- **Side chat.** By default the Portal posts to its own side chat (a stable
+  `session_id` per install), which keeps the main chat clean and makes the
+  tracker drop events tagged with any other session. It's unverified that the
+  subscription carries side-chat events. If a side-chat turn gets no reply and
+  not even its own message back, the app switches to the main chat and says so.
+- **Reply stream failures** are logged as either `REPLY STREAM REFUSED` (a
+  4xx from `/chat/subscribe`: likely not offered to this registration
+  profile; retried every 60 s) or `REPLY STREAM DROPPED` (network or VM;
+  reopened after 3 s), and shown at the top of the screen.
 - **Microphone.** Sideloaded apps get the single `handset-mic`; the far-field
   array behind "Hey Portal" needs a Meta-signed permission. Android 10 also
   silences background microphones, which is why the face stays in front. The

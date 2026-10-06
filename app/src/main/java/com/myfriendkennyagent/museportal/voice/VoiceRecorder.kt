@@ -18,7 +18,8 @@ import kotlinx.coroutines.withContext
 /** Why a recording stopped. */
 enum class StopReason { END_OF_SPEECH, TAPPED, MAX_LENGTH, NO_SPEECH, MIC_ERROR }
 
-class Recording(val pcm: ByteArray, val reason: StopReason, val heardSpeech: Boolean)
+/** [clipped]: the voice-note limit cut the speaker off mid-sentence. */
+class Recording(val pcm: ByteArray, val reason: StopReason, val heardSpeech: Boolean, val clipped: Boolean = false)
 
 /**
  * Records one utterance from the Portal's single-channel `handset-mic` at
@@ -97,7 +98,7 @@ class VoiceRecorder {
         } catch (e: IllegalStateException) {}
         record.release()
       }
-      Recording(out.toByteArray(), reason, vad.heardSpeech)
+      Recording(out.toByteArray(), reason, vad.heardSpeech, clipped = reason == StopReason.MAX_LENGTH && vad.speakingNow)
     }
 
   private fun readFully(record: AudioRecord, buf: ByteArray): Int {
@@ -150,6 +151,10 @@ class EnergyVad(
 
   var endOfSpeech = false
     private set
+
+  /** Speech within the last 300 ms: still talking. */
+  val speakingNow: Boolean
+    get() = heardSpeech && silenceFrames < 300 / VoiceRecorder.FRAME_MS
 
   /** Feeds one frame's RMS; returns a 0..1 display level. */
   fun feed(rms: Double): Float {

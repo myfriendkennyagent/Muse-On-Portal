@@ -46,7 +46,7 @@ class ChatTrackerTest {
         ChatUpdate.Partial("a1", "It's "),
         ChatUpdate.Partial("a1", "It's sunny."),
         ChatUpdate.Reply("a1", "It's sunny."),
-        ChatUpdate.TurnEnded(EndReason.SETTLED),
+        ChatUpdate.TurnEnded(EndReason.SETTLED, sawOwnMessage = true),
       ),
       updates,
     )
@@ -84,7 +84,8 @@ class ChatTrackerTest {
 
   @Test
   fun `parentless live messages are announced, replays and foreign replies are not`() {
-    // A replayed persisted message (no live start) is not spoken.
+    tracker.onSubscribed()
+    // A persisted message replayed as the subscription opens is not spoken.
     event("message.assistant", JSONObject().put("message_id", "old").put("content", "old news"))
     // A phone conversation: the user message is seen, its reply is not ours.
     event("message.user", JSONObject().put("message_id", "phone-1").put("content", "hi from phone"))
@@ -124,6 +125,50 @@ class ChatTrackerTest {
     tracker.onEvent(ChatEvent.parse(other)!!)
     tracker.onEvent(ChatEvent.parse(mine)!!)
     assertEquals(listOf(ChatUpdate.Reply("a1", "portal stuff")), updates)
+  }
+
+  @Test
+  fun `a whole proactive message without deltas is announced once`() {
+    tracker.onSubscribed()
+    now += 6_000 // past the replay guard
+    event("message.assistant", JSONObject().put("message_id", "g1").put("content", "A new paid gig just landed."))
+    event("message.assistant", JSONObject().put("message_id", "g1").put("content", "A new paid gig just landed."))
+    delta("delta.message_done", "g1", text = "A new paid gig just landed.")
+    assertEquals(listOf(ChatUpdate.Announcement("g1", "A new paid gig just landed.")), updates)
+  }
+
+  @Test
+  fun `a message not ready for display waits for the ready copy`() {
+    event(
+      "message.assistant",
+      JSONObject().put("message_id", "g2").put("content", "draft").put("display_text_ready", false),
+    )
+    assertEquals(emptyList<ChatUpdate>(), updates)
+    event("message.assistant", JSONObject().put("message_id", "g2").put("display_text", "Final text."))
+    assertEquals(listOf(ChatUpdate.Announcement("g2", "Final text.")), updates)
+  }
+
+  @Test
+  fun `a streamed message and its persisted copy are spoken once`() {
+    delta("delta.message_start", "c3")
+    delta("delta.text_append", "c3", text = "Backup finished.")
+    delta("delta.message_done", "c3")
+    event("message.assistant", JSONObject().put("message_id", "c3").put("content", "Backup finished."))
+    assertEquals(listOf(ChatUpdate.Announcement("c3", "Backup finished.")), updates)
+  }
+
+  @Test
+  fun `a turn reply is not announced again when its persisted copy arrives`() {
+    tracker.beginTurn()
+    tracker.onAck("u1", null)
+    delta("delta.message_done", "a1", parent = "u1", text = "Sure.")
+    now += 3_000
+    tracker.tick()
+    event("message.assistant", JSONObject().put("message_id", "a1").put("reply_to_message_id", "u1").put("content", "Sure."))
+    assertEquals(
+      listOf(ChatUpdate.Reply("a1", "Sure."), ChatUpdate.TurnEnded(EndReason.SETTLED, sawOwnMessage = true)),
+      updates,
+    )
   }
 
   @Test

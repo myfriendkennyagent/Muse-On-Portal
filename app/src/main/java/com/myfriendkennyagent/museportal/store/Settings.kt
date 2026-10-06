@@ -2,6 +2,7 @@ package com.myfriendkennyagent.museportal.store
 
 import android.content.Context
 import java.util.Calendar
+import java.util.UUID
 
 /** User preferences, kept in SharedPreferences. */
 class Settings(context: Context) {
@@ -36,10 +37,22 @@ class Settings(context: Context) {
     get() = prefs.getBoolean("speak_replies", true)
     set(value) = prefs.edit().putBoolean("speak_replies", value).apply()
 
-  /** Post to a side chat instead of the main chat (a fixed id per device), or null. */
+  /**
+   * The Portal's own side chat (a stable id per install), or null to use the
+   * main chat. On by default: it keeps the main chat clean and lets the
+   * proactive-speech filter ignore every other session. TurnController falls
+   * back to the main chat if side-chat replies don't come back.
+   */
   var sideChatId: String?
-    get() = prefs.getString("side_chat", null)
-    set(value) = prefs.edit().putString("side_chat", value).apply()
+    get() {
+      if (!prefs.contains("side_chat")) {
+        val id = UUID.randomUUID().toString()
+        prefs.edit().putString("side_chat", id).apply()
+        return id
+      }
+      return prefs.getString("side_chat", null)?.ifEmpty { null }
+    }
+    set(value) = prefs.edit().putString("side_chat", value ?: "").apply()
 
   fun inQuietHours(now: Calendar = Calendar.getInstance()): Boolean {
     val start = quietStartHour
