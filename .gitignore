@@ -1,0 +1,26 @@
+# Build output
+.gradle/
+build/
+**/build/
+.kotlin/
+captures/
+*.apk
+*.aab
+
+# Local machine config (Android SDK path, signing)
+local.properties
+*.jks
+*.keystore
+
+# IDEs
+.idea/
+*.iml
+.vscode/
+.DS_Store
+
+# Secrets and device state: never commit tokens or pairings
+secrets/
+*.token
+sdk_token
+pairing.json
+identity.json
